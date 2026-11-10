@@ -350,6 +350,8 @@ button { cursor: pointer; border: none; outline: none; font-family: var(--font-m
 }
 .modal-admin { max-width: 700px; }
 .modal-cart { max-width: 500px; }
+.modal-profile { max-width: 700px; }
+[hidden] { display: none !important; }
 @keyframes slideUp { from { transform: translateY(30px); opacity:0; } to { transform: translateY(0); opacity:1; } }
 .modal-close {
   position: absolute; top: 16px; right: 20px; background: none; color: var(--gray);
@@ -429,6 +431,43 @@ button { cursor: pointer; border: none; outline: none; font-family: var(--font-m
 .order-badge { font-size: 0.7rem; padding: 3px 10px; border-radius: 50px; font-weight: 700; }
 .badge-pending { background: rgba(255,200,0,0.15); color: #ffc800; border: 1px solid rgba(255,200,0,0.3); }
 .badge-ready { background: rgba(0,200,100,0.15); color: #00c864; border: 1px solid rgba(0,200,100,0.3); }
+.profile-user { margin: 14px 0 20px; color: var(--gray); }
+.modal-profile h3 { margin: 20px 0 12px; }
+.guest-order-lookup { margin-top: 26px; padding-top: 22px; border-top: 1px solid var(--border); }
+.guest-order-lookup p, #profileSignIn p { margin-bottom: 12px; color: var(--gray); }
+#guestLookupForm { display: grid; gap: 10px; }
+#guestLookupForm input { width: 100%; padding: 12px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--white); font: inherit; }
+#guestLookupForm input:focus { outline: none; border-color: var(--red); }
+#guestOrderResult { margin-top: 18px; }
+.customer-order-card { padding: 18px; margin: 14px 0; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
+.customer-order-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.customer-order-header h4 { font-size: 1rem; }
+.order-status { padding: 4px 10px; border-radius: 50px; background: var(--card2); font-size: 0.75rem; font-weight: 700; }
+.order-status-pending { color: #ffc800; }
+.order-status-preparing { color: var(--gold); }
+.order-status-ready, .order-status-completed { color: #00c864; }
+.order-status-cancelled { color: var(--red-light); }
+.customer-order-date, .customer-order-contact { margin-top: 8px; color: var(--gray); font-size: 0.82rem; }
+.customer-order-items { padding: 12px 0; margin-top: 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); list-style: none; }
+.customer-order-items li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; }
+.customer-order-items li small { display: block; color: var(--gray); font-size: 0.72rem; }
+.customer-order-total { margin: 12px 0; text-align: right; }
+.order-cancellation { margin: 12px 0; color: var(--gray); }
+.order-cancellation small { display: block; margin-top: 5px; }
+.customer-order-card > .mmi-btn { margin-right: 8px; }
+.profile-error { color: var(--red-light); }
+.order-confirmation { margin-top: 16px; }
+.order-confirmation > p, #guestTrackingDetails p { margin: 10px 0; }
+.order-confirmation label { display: block; margin: 12px 0 6px; color: var(--gray); }
+.tracking-code-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.tracking-code-row input { min-width: 0; flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--white); }
+
+@media (max-width: 600px) {
+  .modal-profile { padding: 28px 20px; }
+  .customer-order-header { align-items: flex-start; }
+  .tracking-code-row { flex-direction: column; }
+  .order-item { align-items: flex-start; gap: 12px; flex-direction: column; }
+}
 
 /* CART */
 .cart-item {

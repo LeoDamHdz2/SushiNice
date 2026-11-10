@@ -27,7 +27,7 @@
  </ul>
  <div class="nav-actions">
  <button class="btn-order" onclick="openCart()"><i class="fas fa-shopping-bag"></i> Ordenar</button>
- <button class="btn-login" onclick="openLogin()"><i class="fas fa-user"></i> Entrar</button>
+ <button class="btn-login" onclick="openProfile()"><i class="fas fa-user"></i> Entrar / mi pedido</button>
  <button class="btn-login" id="logoutButton" onclick="logout()" hidden>Salir</button>
  <button class="hamburger" id="hamburger"><i class="fas fa-bars"></i></button>
  </div>
@@ -224,6 +224,34 @@
  </div>
 </div>
 
+<!-- CUSTOMER PROFILE AND GUEST ORDER TRACKING -->
+<div class="modal-overlay" id="profileModal">
+ <div class="modal modal-profile">
+ <button class="modal-close" type="button" aria-label="Cerrar perfil" onclick="closeProfile()"></button>
+ <h2>Mi perfil y mis pedidos</h2>
+ <section id="profileAccount" hidden>
+ <div class="profile-user" id="profileUser"></div>
+ <button class="mmi-btn" id="adminShortcut" type="button" onclick="closeProfile();openAdmin()" hidden>Abrir administración</button>
+ <h3>Mis pedidos</h3>
+ <div id="profileOrders" aria-live="polite"></div>
+ </section>
+ <section class="guest-order-lookup">
+ <h3>Consultar pedido de invitado</h3>
+ <p>Ingresa el folio y el código secreto que recibiste al confirmar tu pedido.</p>
+ <form id="guestLookupForm" onsubmit="lookupGuestOrder(event)">
+ <input type="number" name="id" min="1" placeholder="Folio del pedido" required/>
+ <input type="text" name="trackingCode" minlength="64" maxlength="64" pattern="[a-fA-F0-9]{64}" autocomplete="off" placeholder="Código secreto de 64 caracteres" required/>
+ <button class="btn-primary" type="submit">Consultar estado</button>
+ </form>
+ <div id="guestOrderResult" aria-live="polite"></div>
+ </section>
+ <div id="profileSignIn">
+ <p>Inicia sesión para consultar el historial de pedidos de tu cuenta.</p>
+ <button class="btn-primary" type="button" onclick="closeProfile();document.getElementById('loginModal').classList.add('open')">Iniciar sesión</button>
+ </div>
+ </div>
+</div>
+
 <!-- ADMIN PANEL MODAL -->
 <div class="modal-overlay" id="adminModal">
  <div class="modal modal-admin">
@@ -301,6 +329,23 @@
  <button class="btn-primary" type="submit" style="width:100%;margin-top:16px">Enviar pedido</button>
  <button class="mmi-btn" type="button" onclick="cancelCheckout()" style="width:100%;margin-top:8px">Volver a mi orden</button>
  </form>
+ <div id="orderConfirmation" class="order-confirmation" style="display:none" aria-live="polite">
+ <h3>Pedido registrado</h3>
+ <p id="orderConfirmationSummary"></p>
+ <div id="guestTrackingDetails" style="display:none">
+ <p>Guarda el folio y el código secreto para consultar el estado y cancelar tu pedido después.</p>
+ <label for="guestTrackingCode">Código secreto del pedido</label>
+ <div class="tracking-code-row">
+ <input id="guestTrackingCode" type="text" readonly/>
+ <button class="mmi-btn" type="button" onclick="copyGuestTrackingCode()">Copiar</button>
+ </div>
+ <button class="btn-primary" type="button" onclick="closeCart();openProfile()">Consultar mi pedido</button>
+ </div>
+ <div id="accountOrderDetails" style="display:none">
+ <button class="btn-primary" type="button" onclick="closeCart();openProfile()">Ver mis pedidos</button>
+ </div>
+ <button class="mmi-btn" type="button" onclick="closeCart()" style="width:100%;margin-top:8px">Cerrar</button>
+ </div>
  </div>
 </div>
 

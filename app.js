@@ -7,6 +7,7 @@ let cart = [];
 let currentUser = null;
 let currentCat = 'sopas';
 let MENU_DATA = {};
+let profileRefreshTimer = null;
 
 // ══════════════════════════════════
 // INIT
@@ -153,6 +154,12 @@ function openCart() {
 }
 function closeCart() {
   document.getElementById('cartModal').classList.remove('open');
+  document.getElementById('orderConfirmation').style.display = 'none';
+  document.getElementById('guestTrackingDetails').style.display = 'none';
+  document.getElementById('accountOrderDetails').style.display = 'none';
+  document.getElementById('cartContents').style.display = 'block';
+  document.getElementById('checkoutForm').style.display = 'none';
+  document.getElementById('checkoutForm').reset();
 }
 
 function renderCart() {
@@ -190,6 +197,11 @@ function checkout() {
     showToast('Agrega al menos un platillo antes de continuar.');
     return;
   }
+  if (currentUser) {
+    const form = document.getElementById('checkoutForm');
+    form.elements.name.value = currentUser.name;
+    form.elements.email.value = currentUser.email;
+  }
   document.getElementById('checkoutSummary').textContent =
     `Total estimado: ${formatPrice(cart.reduce((sum, item) => sum + item.price * item.qty, 0))}`;
   document.getElementById('cartContents').style.display = 'none';
@@ -222,8 +234,13 @@ async function submitOrder(event) {
     form.reset();
     cancelCheckout();
     updateCartBadge();
-    closeCart();
-    showToast(`Pedido #${result.order.id} confirmado. Total: ${formatPrice(result.order.total)}`);
+    const isGuestOrder = Boolean(result.order.trackingCode);
+    document.getElementById('orderConfirmationSummary').textContent =
+      `Pedido #${result.order.id} recibido el ${formatOrderDate(result.order.orderedAt)}. Total: ${formatPrice(result.order.total)}. Estado: pendiente.`;
+    document.getElementById('guestTrackingDetails').style.display = isGuestOrder ? 'block' : 'none';
+    document.getElementById('accountOrderDetails').style.display = isGuestOrder ? 'none' : 'block';
+    document.getElementById('guestTrackingCode').value = result.order.trackingCode || '';
+    document.getElementById('orderConfirmation').style.display = 'block';
   } catch (error) {
     showToast(error.message || 'No se pudo guardar el pedido.');
   } finally {
@@ -237,8 +254,7 @@ async function submitOrder(event) {
 // ══════════════════════════════════
 function openLogin() {
   if (currentUser) {
-    if (currentUser.isAdmin) openAdmin();
-    else showToast(`Sesión activa: ${currentUser.name}`);
+    openProfile();
     return;
   }
   document.getElementById('loginModal').classList.add('open');
@@ -300,8 +316,182 @@ function updateAuthUI() {
   loginButton.replaceChildren();
   const icon = document.createElement('i');
   icon.className = 'fas fa-user';
-  loginButton.append(icon, document.createTextNode(currentUser ? ` ${currentUser.name}` : ' Entrar'));
+  loginButton.append(icon, document.createTextNode(currentUser ? ` Mi perfil: ${currentUser.name}` : ' Entrar / mi pedido'));
+  loginButton.setAttribute('aria-label', currentUser ? `Mi perfil de ${currentUser.name}` : 'Iniciar sesión o consultar un pedido');
   logoutButton.hidden = !currentUser;
+}
+
+function openProfile() {
+  const modal = document.getElementById('profileModal');
+  document.getElementById('profileAccount').hidden = !currentUser;
+  document.getElementById('profileSignIn').style.display = currentUser ? 'none' : 'block';
+  document.getElementById('adminShortcut').hidden = !currentUser || !currentUser.isAdmin;
+  document.getElementById('guestOrderResult').textContent = '';
+  if (currentUser) {
+    document.getElementById('profileUser').textContent = `${currentUser.name} · ${currentUser.email}`;
+  }
+  modal.classList.add('open');
+  if (currentUser) {
+    loadProfileOrders();
+    if (!profileRefreshTimer) profileRefreshTimer = setInterval(loadProfileOrders, 30000);
+  }
+}
+
+function closeProfile() {
+  document.getElementById('profileModal').classList.remove('open');
+  if (profileRefreshTimer) {
+    clearInterval(profileRefreshTimer);
+    profileRefreshTimer = null;
+  }
+}
+
+async function loadProfileOrders() {
+  try {
+    const result = await apiRequest('my-orders', {}, 'GET');
+    renderProfileOrders(result.orders);
+  } catch (error) {
+    const container = document.getElementById('profileOrders');
+    container.innerHTML = `<p class="profile-error">${escapeHtml(error.message || 'No se pudieron cargar tus pedidos.')}</p>`;
+  }
+}
+
+function renderProfileOrders(orders) {
+  const container = document.getElementById('profileOrders');
+  if (orders.length === 0) {
+    container.innerHTML = '<p class="cart-empty">Aún no tienes pedidos asociados a tu cuenta.</p>';
+    return;
+  }
+  container.innerHTML = orders.map(order => renderCustomerOrder(order)).join('');
+}
+
+function formatOrderDate(value) {
+  const date = new Date(String(value).replace(' ', 'T'));
+  return Number.isNaN(date.getTime())
+    ? escapeHtml(value)
+    : date.toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function orderStatusLabel(status) {
+  return ({
+    pending: 'Pendiente',
+    preparing: 'En preparación',
+    ready: 'Listo',
+    completed: 'Completado',
+    cancelled: 'Cancelado',
+  })[status] || status;
+}
+
+function renderCustomerOrder(order, trackingCode = '') {
+  const refreshButton = `
+    <button class="mmi-btn" type="button" onclick="refreshCustomerOrder(${order.id}, '${trackingCode}')">
+      Actualizar estado
+    </button>`;
+  const cancellation = order.canCancel
+    ? `<div class="order-cancellation">
+         Cargo de cancelación: <strong>${formatPrice(order.cancellationFeeEstimate)}</strong>
+         <small>50 % de alimentos y otros productos; 100 % de bebidas. El cargo queda registrado, pero no se realiza un cobro real.</small>
+       </div>
+       ${refreshButton}
+       <button class="btn-primary" type="button" onclick="cancelCustomerOrder(${order.id}, '${trackingCode}', ${Number(order.cancellationFeeEstimate)})">Cancelar pedido</button>`
+    : order.status === 'cancelled'
+      ? `<p class="order-cancellation">Cargo de cancelación registrado: <strong>${formatPrice(order.cancellationFee || 0)}</strong>. No se realizó un cobro real.</p>${refreshButton}`
+      : `<p class="order-cancellation">Este pedido ya está listo o fue completado; no se puede cancelar.</p>${refreshButton}`;
+  return `
+    <article class="customer-order-card">
+      <div class="customer-order-header">
+        <h4>Pedido #${order.id}</h4>
+        <span class="order-status order-status-${escapeHtml(order.status)}">${orderStatusLabel(order.status)}</span>
+      </div>
+      <p class="customer-order-date">Ordenado el ${formatOrderDate(order.orderedAt)}</p>
+      <p class="customer-order-contact">
+        ${escapeHtml(order.name)} · ${escapeHtml(order.email)} · ${escapeHtml(order.phone)}<br/>
+        Entrega: ${escapeHtml(order.address)}
+      </p>
+      <ul class="customer-order-items">
+        ${order.items.map(item => `
+          <li><span>${escapeHtml(item.name)} × ${Number(item.quantity)}<small>${escapeHtml(categoryName(item.category || ''))}</small></span>
+          <span>${formatPrice(Number(item.unitPrice) * Number(item.quantity))}</span></li>
+        `).join('')}
+      </ul>
+      <p class="customer-order-total">Total del pedido: <strong>${formatPrice(order.total)}</strong></p>
+      ${cancellation}
+    </article>`;
+}
+
+async function lookupGuestOrder(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const fields = Object.fromEntries(new FormData(form));
+  const resultContainer = document.getElementById('guestOrderResult');
+  button.disabled = true;
+  resultContainer.textContent = 'Buscando pedido...';
+  try {
+    await renderGuestOrder(Number(fields.id), fields.trackingCode.trim());
+  } catch (error) {
+    resultContainer.innerHTML = `<p class="profile-error">${escapeHtml(error.message || 'No se encontró el pedido.')}</p>`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function renderGuestOrder(id, trackingCode) {
+  const result = await apiRequest('guest-order', { id, trackingCode });
+  document.getElementById('guestOrderResult').innerHTML =
+    renderCustomerOrder(result.order, trackingCode);
+}
+
+async function refreshCustomerOrder(id, trackingCode) {
+  if (trackingCode) {
+    const resultContainer = document.getElementById('guestOrderResult');
+    resultContainer.textContent = 'Actualizando estado...';
+    try {
+      await renderGuestOrder(id, trackingCode);
+    } catch (error) {
+      resultContainer.innerHTML = `<p class="profile-error">${escapeHtml(error.message || 'No se pudo actualizar el pedido.')}</p>`;
+    }
+    return;
+  }
+  await loadProfileOrders();
+}
+
+async function cancelCustomerOrder(id, trackingCode, estimatedFee) {
+  const fee = formatPrice(estimatedFee);
+  if (!window.confirm(
+    `Vas a cancelar el pedido #${id}. El cargo será ${fee}: 50 % para alimentos y otros productos y 100 % para bebidas. ` +
+    'El cargo quedará registrado; por ahora, no se procesará ningún pago. ¿Deseas continuar?'
+  )) return;
+
+  try {
+    const result = await apiRequest('cancel-order', {
+      id,
+      ...(trackingCode ? { trackingCode } : {}),
+    });
+    showToast(`Pedido #${id} cancelado. Cargo registrado: ${formatPrice(result.order.cancellationFee)}. No se realizó un cobro.`);
+    if (trackingCode) {
+      document.getElementById('guestOrderResult').innerHTML =
+        renderCustomerOrder(result.order, trackingCode);
+    } else {
+      await loadProfileOrders();
+    }
+  } catch (error) {
+    showToast(error.message || 'No se pudo cancelar el pedido.');
+    if (trackingCode) {
+      await refreshCustomerOrder(id, trackingCode);
+    } else {
+      await loadProfileOrders();
+    }
+  }
+}
+
+async function copyGuestTrackingCode() {
+  const code = document.getElementById('guestTrackingCode').value;
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast('Código secreto copiado.');
+  } catch {
+    showToast('No se pudo copiar. Selecciona y copia el código manualmente.');
+  }
 }
 
 async function doLogin(event) {
@@ -319,7 +509,7 @@ async function doLogin(event) {
     closeLogin();
     document.getElementById('loginForm').reset();
     showToast(`Bienvenido, ${currentUser.name}`);
-    if (currentUser.isAdmin) setTimeout(openAdmin, 500);
+    openProfile();
   } catch (error) {
     showToast(error.message || 'No se pudo iniciar sesión.');
   } finally {
@@ -363,6 +553,7 @@ async function logout() {
     await authRequest({ action: 'logout' });
     currentUser = null;
     updateAuthUI();
+    closeProfile();
     closeAdmin();
     showToast('Sesión cerrada.');
   } catch (error) {
@@ -518,15 +709,10 @@ function renderOrders(orders) {
             ${orderStatusLabel(status)}
           </option>`).join('')}
         <option value="completed">Completado</option>
-        <option value="cancelled">Cancelado</option>
       </select>
     </div>
   `).join('');
   if (orders.length === 0) container.innerHTML = '<p class="cart-empty">No hay pedidos activos.</p>';
-}
-
-function orderStatusLabel(status) {
-  return ({ pending: 'Pendiente', preparing: 'En preparación', ready: 'Listo' })[status] || status;
 }
 
 async function updateOrderStatus(id, status) {
@@ -675,6 +861,9 @@ function showToast(msg) {
 // ── Close modals on overlay click ──
 document.querySelectorAll('.modal-overlay').forEach(overlay => {
   overlay.addEventListener('click', e => {
-    if (e.target === overlay) overlay.classList.remove('open');
+    if (e.target !== overlay) return;
+    if (overlay.id === 'profileModal') closeProfile();
+    else if (overlay.id === 'cartModal') closeCart();
+    else overlay.classList.remove('open');
   });
 });

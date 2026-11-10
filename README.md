@@ -32,7 +32,15 @@ El navegador obtiene el menú y envía pedidos y mensajes a `api.php`. Los datos
 
    No guardes contraseñas reales en el repositorio. Después de cambiar la configuración de Apache, reinícialo.
 
-5. Abre `http://localhost/sushinice/index.php`. Registra una cuenta y, desde MySQL, habilita explícitamente la cuenta de administración que corresponda:
+5. Si la base de datos se creó antes de agregar el seguimiento de pedidos, ejecuta una vez la actualización compatible y repetible:
+
+   ```powershell
+   C:\xampp\php\php.exe C:\xampp\htdocs\sushinice\migrate.php
+   ```
+
+   La actualización agrega las columnas de seguimiento, las categorías históricas de los productos y los cargos de cancelación; no elimina cuentas, pedidos ni artículos. Las categorías anteriores se recuperan del menú actual cuando el producto todavía existe.
+
+6. Abre `http://localhost/sushinice/index.php`. Registra una cuenta y, desde MySQL, habilita explícitamente la cuenta de administración que corresponda:
 
    ```sql
    UPDATE usuarios SET es_admin = 1 WHERE correo = 'admin@example.com';
@@ -46,6 +54,12 @@ El navegador obtiene el menú y envía pedidos y mensajes a `api.php`. Los datos
 - `auth.php` registra usuarios, inicia y cierra sesiones.
 - `api.php?action=menu` entrega los productos de MySQL.
 - El formulario de pedido acepta invitados; el servidor vuelve a validar el menú, calcula los precios vigentes y guarda el pedido y sus renglones en una transacción.
+- Una cuenta iniciada puede abrir «Mi perfil» para consultar hasta 50 pedidos, su estado actual, la fecha y hora del pedido, los artículos y el total. La lista se actualiza automáticamente mientras el perfil está abierto.
+- Un invitado puede consultar su pedido con su folio y el código secreto que se muestra una sola vez al confirmarlo. El código tiene 256 bits de aleatoriedad; solo se guarda su hash en MySQL. Conviene copiarlo y conservarlo porque no se envía por correo.
+- Los pedidos de invitado creados antes de habilitar el seguimiento no tienen un código secreto y no se pueden consultar desde el perfil; se debe contactar al restaurante para obtener información sobre ellos. No se permite reclamarlos solo con el folio.
+- Se puede cancelar solo mientras el pedido está pendiente o en preparación. Antes de confirmar se muestra el cargo calculado con los precios registrados: 50 % sobre los productos que no sean bebidas y 100 % sobre las bebidas. El cargo queda registrado en el pedido cancelado.
+- La aplicación no tiene una pasarela de pago y **no cobra dinero realmente**: el importe de cancelación se registra como cargo pendiente y el perfil lo indica explícitamente.
+- El panel de administración no permite cancelar o reactivar pedidos ni retroceder su estado, de modo que no se pueda eludir el cálculo de la cancelación.
 - El contacto se guarda en `mensajes_contacto`.
 - La edición del menú, los pedidos, sus estados y las métricas de ventas están restringidos a administradores. El panel calcula cifras y gráficas a partir de pedidos guardados; no publica cifras de ventas simuladas.
 - NiceBot obtiene los nombres y precios recomendados del menú actual, por lo que no conserva precios ni platillos desactualizados.

@@ -37,6 +37,99 @@ function api_require_admin(): void
     }
 }
 
+function api_require_user(): int
+{
+    $userId = filter_var($_SESSION['user']['id'] ?? null, FILTER_VALIDATE_INT);
+    if ($userId === false || $userId < 1) {
+        api_respond(401, ['error' => 'Inicia sesión para consultar tus pedidos.']);
+    }
+
+    return $userId;
+}
+
+function api_load_order_items(PDO $pdo, array $orderIds): array
+{
+    if ($orderIds === []) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($orderIds), '?'));
+    $statement = $pdo->prepare(
+        "SELECT pedido_id, nombre_item AS name, categoria_item AS category, "
+        . "precio_unitario AS unit_price, cantidad AS quantity "
+        . "FROM pedido_items WHERE pedido_id IN ($placeholders) ORDER BY id"
+    );
+    $statement->execute($orderIds);
+    $items = [];
+    foreach ($statement->fetchAll() as $item) {
+        $items[(int) $item['pedido_id']][] = [
+            'name' => $item['name'],
+            'category' => $item['category'],
+            'unitPrice' => $item['unit_price'],
+            'quantity' => (int) $item['quantity'],
+        ];
+    }
+
+    return $items;
+}
+
+function api_cancellation_fee_cents(array $items): int
+{
+    $foodSubtotalCents = 0;
+    $beverageSubtotalCents = 0;
+    foreach ($items as $item) {
+        $subtotalCents = (int) round(
+            (float) $item['unitPrice'] * (int) $item['quantity'] * 100,
+            0,
+            PHP_ROUND_HALF_UP
+        );
+        if ($item['category'] === 'bebidas') {
+            $beverageSubtotalCents += $subtotalCents;
+        } else {
+            $foodSubtotalCents += $subtotalCents;
+        }
+    }
+
+    return intdiv($foodSubtotalCents, 2) + ($foodSubtotalCents % 2) + $beverageSubtotalCents;
+}
+
+function api_order_view(array $order, array $items): array
+{
+    $canCancel = in_array($order['status'], ['pending', 'preparing'], true);
+
+    return [
+        'id' => (int) $order['id'],
+        'status' => $order['status'],
+        'orderedAt' => $order['ordered_at'],
+        'name' => $order['name'],
+        'email' => $order['email'],
+        'phone' => $order['phone'],
+        'address' => $order['address'],
+        'total' => $order['total'],
+        'cancellationFee' => $order['cancellation_fee'],
+        'cancellationFeeEstimate' => $canCancel
+            ? number_format(api_cancellation_fee_cents($items) / 100, 2, '.', '')
+            : null,
+        'canCancel' => $canCancel,
+        'items' => $items,
+    ];
+}
+
+function api_tracking_code(array $data): string
+{
+    $orderId = filter_var($data['id'] ?? null, FILTER_VALIDATE_INT);
+    $code = $data['trackingCode'] ?? null;
+    if (
+        $orderId === false || $orderId < 1
+        || !is_string($code)
+        || !preg_match('/\A[a-f0-9]{64}\z/i', $code)
+    ) {
+        api_respond(422, ['error' => 'Escribe el folio y el código secreto que recibiste al hacer tu pedido.']);
+    }
+
+    return strtolower($code);
+}
+
 function api_string(array $data, string $key, int $maxLength, bool $required = true): string
 {
     $input = $data[$key] ?? '';
@@ -133,7 +226,7 @@ try {
         $pdo->beginTransaction();
         $placeholders = implode(',', array_fill(0, count($quantities), '?'));
         $statement = $pdo->prepare(
-            "SELECT id, nombre, precio FROM menu_items WHERE id IN ($placeholders) ORDER BY id"
+            "SELECT id, nombre, categoria, precio FROM menu_items WHERE id IN ($placeholders) ORDER BY id"
         );
         $statement->execute(array_keys($quantities));
         $items = $statement->fetchAll();
@@ -147,30 +240,157 @@ try {
             $total += (float) $item['precio'] * $quantities[(int) $item['id']];
         }
         $userId = $_SESSION['user']['id'] ?? null;
+        $trackingCode = $userId === null ? bin2hex(random_bytes(32)) : null;
         $statement = $pdo->prepare(
-            'INSERT INTO pedidos (usuario_id, nombre_cliente, correo_cliente, telefono, domicilio, total) '
-            . 'VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO pedidos '
+            . '(usuario_id, folio_secreto_hash, nombre_cliente, correo_cliente, telefono, domicilio, total) '
+            . 'VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
-        $statement->execute([$userId, $name, $email, $phone, $address, number_format($total, 2, '.', '')]);
+        $statement->execute([
+            $userId,
+            $trackingCode !== null ? hash('sha256', $trackingCode) : null,
+            $name,
+            $email,
+            $phone,
+            $address,
+            number_format($total, 2, '.', ''),
+        ]);
         $orderId = (int) $pdo->lastInsertId();
 
         $insertItem = $pdo->prepare(
-            'INSERT INTO pedido_items (pedido_id, menu_item_id, nombre_item, precio_unitario, cantidad) '
-            . 'VALUES (?, ?, ?, ?, ?)'
+            'INSERT INTO pedido_items '
+            . '(pedido_id, menu_item_id, nombre_item, categoria_item, precio_unitario, cantidad) '
+            . 'VALUES (?, ?, ?, ?, ?, ?)'
         );
         foreach ($items as $item) {
             $insertItem->execute([
                 $orderId,
                 $item['id'],
                 $item['nombre'],
+                $item['categoria'],
                 $item['precio'],
                 $quantities[(int) $item['id']],
             ]);
         }
         $pdo->commit();
+        $order = ['id' => $orderId, 'total' => number_format($total, 2, '.', '')];
+        $statement = $pdo->prepare(
+            "SELECT DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%s') FROM pedidos WHERE id = ?"
+        );
+        $statement->execute([$orderId]);
+        $order['orderedAt'] = $statement->fetchColumn();
+        if ($trackingCode !== null) {
+            $order['trackingCode'] = $trackingCode;
+        }
         api_respond(201, [
             'message' => 'Tu pedido se guardó correctamente.',
-            'order' => ['id' => $orderId, 'total' => number_format($total, 2, '.', '')],
+            'order' => $order,
+        ]);
+    }
+
+    if ($action === 'my-orders' && $method === 'GET') {
+        $userId = api_require_user();
+        $statement = $pdo->prepare(
+            'SELECT id, estado AS status, created_at AS ordered_at, nombre_cliente AS name, '
+            . 'correo_cliente AS email, telefono AS phone, domicilio AS address, total, '
+            . 'cargo_cancelacion AS cancellation_fee FROM pedidos '
+            . 'WHERE usuario_id = ? ORDER BY created_at DESC, id DESC LIMIT 50'
+        );
+        $statement->execute([$userId]);
+        $orders = $statement->fetchAll();
+        $itemsByOrder = api_load_order_items($pdo, array_map(
+            static fn(array $order): int => (int) $order['id'],
+            $orders
+        ));
+        api_respond(200, [
+            'orders' => array_map(
+                static fn(array $order): array => api_order_view(
+                    $order,
+                    $itemsByOrder[(int) $order['id']] ?? []
+                ),
+                $orders
+            ),
+        ]);
+    }
+
+    if ($action === 'guest-order' && $method === 'POST') {
+        $code = api_tracking_code($data);
+        $orderId = (int) $data['id'];
+        $statement = $pdo->prepare(
+            'SELECT id, estado AS status, created_at AS ordered_at, nombre_cliente AS name, '
+            . 'correo_cliente AS email, telefono AS phone, domicilio AS address, total, '
+            . 'cargo_cancelacion AS cancellation_fee FROM pedidos '
+            . 'WHERE id = ? AND usuario_id IS NULL AND folio_secreto_hash = ? LIMIT 1'
+        );
+        $statement->execute([$orderId, hash('sha256', $code)]);
+        $order = $statement->fetch();
+        if (!$order) {
+            api_respond(404, ['error' => 'No encontramos el pedido. Revisa el folio y el código secreto.']);
+        }
+        $items = api_load_order_items($pdo, [(int) $order['id']]);
+        api_respond(200, [
+            'order' => api_order_view($order, $items[(int) $order['id']] ?? []),
+        ]);
+    }
+
+    if ($action === 'cancel-order' && $method === 'POST') {
+        $orderId = filter_var($data['id'] ?? null, FILTER_VALIDATE_INT);
+        if ($orderId === false || $orderId < 1) {
+            api_respond(422, ['error' => 'El número de pedido no es válido.']);
+        }
+
+        $userId = $_SESSION['user']['id'] ?? null;
+        $trackingCode = null;
+        if (($data['trackingCode'] ?? '') !== '') {
+            $trackingCode = api_tracking_code($data);
+        }
+        if ($userId === null && $trackingCode === null) {
+            api_respond(401, ['error' => 'Inicia sesión o usa el código secreto de tu pedido de invitado.']);
+        }
+
+        $pdo->beginTransaction();
+        $statement = $pdo->prepare(
+            'SELECT id, estado AS status, created_at AS ordered_at, nombre_cliente AS name, '
+            . 'correo_cliente AS email, telefono AS phone, domicilio AS address, total, '
+            . 'cargo_cancelacion AS cancellation_fee FROM pedidos '
+            . 'WHERE id = ? AND (usuario_id = ? OR (usuario_id IS NULL AND folio_secreto_hash = ?)) '
+            . 'FOR UPDATE'
+        );
+        $statement->execute([
+            $orderId,
+            $userId,
+            $trackingCode !== null ? hash('sha256', $trackingCode) : null,
+        ]);
+        $order = $statement->fetch();
+        if (!$order) {
+            $pdo->rollBack();
+            api_respond(404, ['error' => 'No encontramos el pedido en tu cuenta.']);
+        }
+        if (!in_array($order['status'], ['pending', 'preparing'], true)) {
+            $pdo->rollBack();
+            api_respond(409, ['error' => 'El pedido ya no se puede cancelar: solo se aceptan cancelaciones antes de que esté listo.']);
+        }
+
+        $itemsByOrder = api_load_order_items($pdo, [(int) $order['id']]);
+        $items = $itemsByOrder[(int) $order['id']] ?? [];
+        $fee = api_cancellation_fee_cents($items);
+        $cancellationFee = number_format($fee / 100, 2, '.', '');
+        $statement = $pdo->prepare(
+            "UPDATE pedidos SET estado = 'cancelled', cargo_cancelacion = ? "
+            . "WHERE id = ? AND estado IN ('pending', 'preparing')"
+        );
+        $statement->execute([$cancellationFee, $orderId]);
+        if ($statement->rowCount() !== 1) {
+            $pdo->rollBack();
+            api_respond(409, ['error' => 'El pedido cambió de estado y ya no se puede cancelar. Actualiza el perfil e inténtalo de nuevo.']);
+        }
+        $pdo->commit();
+
+        $order['status'] = 'cancelled';
+        $order['cancellation_fee'] = $cancellationFee;
+        api_respond(200, [
+            'message' => 'Cancelación registrada. El cargo quedó anotado, pero no se procesó ningún pago.',
+            'order' => api_order_view($order, $items),
         ]);
     }
 
@@ -295,19 +515,33 @@ try {
         $status = (string) ($data['status'] ?? '');
         if (
             $id === false || $id < 1
-            || !in_array($status, ['pending', 'preparing', 'ready', 'completed', 'cancelled'], true)
+            || !in_array($status, ['pending', 'preparing', 'ready', 'completed'], true)
         ) {
             api_respond(422, ['error' => 'El estado o pedido seleccionado no es válido.']);
         }
+        $pdo->beginTransaction();
+        $statement = $pdo->prepare('SELECT estado FROM pedidos WHERE id = ? FOR UPDATE');
+        $statement->execute([$id]);
+        $currentStatus = $statement->fetchColumn();
+        if ($currentStatus === false) {
+            $pdo->rollBack();
+            api_respond(404, ['error' => 'El pedido ya no existe.']);
+        }
+        if (
+            $currentStatus === 'cancelled'
+            || ($currentStatus === 'completed' && $status !== 'completed')
+        ) {
+            $pdo->rollBack();
+            api_respond(409, ['error' => 'No se puede reactivar un pedido cancelado ni retroceder un pedido completado.']);
+        }
+        $rank = ['pending' => 0, 'preparing' => 1, 'ready' => 2, 'completed' => 3];
+        if ($rank[$status] < $rank[$currentStatus]) {
+            $pdo->rollBack();
+            api_respond(409, ['error' => 'El estado de un pedido no se puede retroceder.']);
+        }
         $statement = $pdo->prepare('UPDATE pedidos SET estado = ? WHERE id = ?');
         $statement->execute([$status, $id]);
-        if ($statement->rowCount() === 0) {
-            $check = $pdo->prepare('SELECT id FROM pedidos WHERE id = ?');
-            $check->execute([$id]);
-            if (!$check->fetch()) {
-                api_respond(404, ['error' => 'El pedido ya no existe.']);
-            }
-        }
+        $pdo->commit();
         api_respond(200, ['message' => 'El estado del pedido se actualizó.']);
     }
 
