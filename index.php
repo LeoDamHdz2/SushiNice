@@ -4,7 +4,7 @@
  <meta charset="UTF-8" />
  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
  <title>SushiNice | Sushi Auténtico</title>
- <link rel="stylesheet" href="style.css"/>
+ <link rel="stylesheet" href="style.css?v=<?= filemtime(__DIR__ . '/style.css') ?>"/>
  <link rel="preconnect" href="https://fonts.googleapis.com">
  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;700;900&family=Montserrat:wght@300;400;600;800&display=swap" rel="stylesheet">
  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
@@ -55,7 +55,7 @@
  </div>
  <div class="hero-img-wrap">
  <div class="hero-plate">
- <img src="images/hero-sushi.png" alt="Sushi" onerror="this.src='https://images.unsplash.com/photo-1617196034183-421b4040ed20?w=500&q=80'"/>
+ <img src="images/hero-sushi.svg" alt="Variedad de sushi sobre un plato japonés"/>
  </div>
  <div class="badge-float">
  <span>20% OFF</span>
@@ -115,13 +115,9 @@
  </div>
  </div>
  <div class="ai-panel">
- <h3> Predicción de Ventas</h3>
- <p class="panel-sub">Análisis IA · Semana actual</p>
- <div class="sales-chart" id="salesChart"></div>
- <div class="top-items">
- <h4> Top Vendidos (IA)</h4>
- <div id="topItems"></div>
- </div>
+ <h3>Encuentra tu favorito</h3>
+ <p class="panel-sub">NiceBot recomienda opciones del menú vigente según tus gustos.</p>
+ <button class="btn-primary" type="button" onclick="document.getElementById('aiInput').focus()">Pedir una recomendación</button>
  </div>
  </div>
 </section>
@@ -147,10 +143,10 @@
  </div>
  <form class="contact-form" onsubmit="submitContact(event)">
  <h3>Envíanos un mensaje</h3>
- <input type="text" placeholder="Tu nombre" required/>
- <input type="email" placeholder="Tu correo" required/>
- <input type="tel" placeholder="Teléfono (opcional)"/>
- <textarea rows="4" placeholder="¿En qué podemos ayudarte?"></textarea>
+ <input type="text" name="name" maxlength="100" placeholder="Tu nombre" autocomplete="name" required/>
+ <input type="email" name="email" maxlength="254" placeholder="Tu correo" autocomplete="email" required/>
+ <input type="tel" name="phone" maxlength="30" placeholder="Teléfono (opcional)" autocomplete="tel"/>
+ <textarea name="message" rows="4" maxlength="5000" placeholder="¿En qué podemos ayudarte?" required></textarea>
  <button type="submit" class="btn-primary">Enviar mensaje <i class="fas fa-arrow-right"></i></button>
  </form>
  </div>
@@ -200,7 +196,7 @@
  </div>
  <div class="footer-bottom">
  <p>© 2025 SushiNice · Todos los derechos reservados</p>
- <p>Hecho con en México</p>
+ <p>Hecho en México</p>
  </div>
 </footer>
 
@@ -232,29 +228,51 @@
 <div class="modal-overlay" id="adminModal">
  <div class="modal modal-admin">
  <button class="modal-close" onclick="closeAdmin()"></button>
- <h2Panel de Administración</h2>
+ <h2>Panel de Administración</h2>
  <div class="admin-tabs">
- <button class="atab active" onclick="switchAdmin('ventas')"Ventas</button>
- <button class="atab" onclick="switchAdmin('menu')"Menú</button>
- <button class="atab" onclick="switchAdmin('pedidos')"Pedidos</button>
+ <button class="atab active" type="button" onclick="switchAdmin('ventas', this)">Ventas</button>
+ <button class="atab" type="button" onclick="switchAdmin('menu', this)">Menú</button>
+ <button class="atab" type="button" onclick="switchAdmin('pedidos', this)">Pedidos</button>
  </div>
  <div id="adminVentas" class="admin-panel">
  <h3>Resumen de Ventas</h3>
  <div class="admin-stats">
- <div class="astat red"><h4>$12,450</h4><p>Ventas hoy</p></div>
- <div class="astat"><h4>87</h4><p>Pedidos hoy</p></div>
- <div class="astat"><h4>$143.10</h4><p>Ticket promedio</p></div>
- <div class="astat"><h4>96%</h4><p>Satisfacción</p></div>
+ <div class="astat red"><h4 id="salesToday">—</h4><p>Ventas hoy</p></div>
+ <div class="astat"><h4 id="ordersToday">—</h4><p>Pedidos hoy</p></div>
+ <div class="astat"><h4 id="averageTicket">—</h4><p>Ticket promedio hoy</p></div>
+ <div class="astat"><h4 id="activeOrders">—</h4><p>Pedidos activos</p></div>
  </div>
  <div class="ai-prediction-box">
- <h4> Predicción IA – Próxima semana</h4>
- <div id="predChart"></div>
+ <h4>Ventas registradas · últimos 7 días</h4>
+ <div class="sales-chart" id="salesChart"></div>
+ <div class="top-items">
+ <h4>Platillos más pedidos · últimos 30 días</h4>
+ <div id="topItems"></div>
+ </div>
  </div>
  </div>
  <div id="adminMenu" class="admin-panel" style="display:none">
  <h3>Gestionar Menú</h3>
  <div class="menu-manager" id="menuManager"></div>
- <button class="btn-primary" onclick="addItem()" style="margin-top:16px">+ Agregar Ítem</button>
+ <button class="btn-primary" type="button" onclick="addItem()" style="margin-top:16px">+ Agregar platillo</button>
+ <form id="menuItemForm" class="menu-item-form" onsubmit="saveMenuItem(event)" style="display:none">
+ <input type="hidden" name="id"/>
+ <input type="text" name="name" maxlength="120" placeholder="Nombre del platillo" required/>
+ <select name="category" required>
+ <option value="sopas">Sopas / Ramen</option>
+ <option value="ensaladas">Ensaladas</option>
+ <option value="kushiagues">Kushiagues</option>
+ <option value="rolls">Rolls Especiales</option>
+ <option value="bebidas">Bebidas</option>
+ </select>
+ <textarea name="description" maxlength="500" placeholder="Descripción" required></textarea>
+ <input type="number" name="price" min="0" max="99999999" step="0.01" placeholder="Precio en MXN" required/>
+ <input type="url" name="image" maxlength="500" placeholder="URL de imagen HTTPS" required/>
+ <div class="mmi-actions">
+ <button class="btn-primary" type="submit">Guardar</button>
+ <button class="mmi-btn" type="button" onclick="cancelMenuEdit()">Cancelar</button>
+ </div>
+ </form>
  </div>
  <div id="adminPedidos" class="admin-panel" style="display:none">
  <h3>Pedidos Activos</h3>
@@ -267,17 +285,29 @@
 <div class="modal-overlay" id="cartModal">
  <div class="modal modal-cart">
  <button class="modal-close" onclick="closeCart()"></button>
- <h2Tu Orden</h2>
+ <h2>Tu Orden</h2>
+ <div id="cartContents">
  <div id="cartItems"></div>
  <div class="cart-total" id="cartTotal"></div>
- <button class="btn-primary" onclick="checkout()" style="width:100%;margin-top:16px">Confirmar Pedido</button>
+ <button class="btn-primary" type="button" onclick="checkout()" style="width:100%;margin-top:16px">Continuar con el pedido</button>
+ </div>
+ <form id="checkoutForm" onsubmit="submitOrder(event)" style="display:none">
+ <p>Completa tus datos de contacto y entrega para registrar tu pedido.</p>
+ <input type="text" name="name" maxlength="100" placeholder="Nombre completo" autocomplete="name" required/>
+ <input type="email" name="email" maxlength="254" placeholder="Correo electrónico" autocomplete="email" required/>
+ <input type="tel" name="phone" maxlength="30" placeholder="Teléfono" autocomplete="tel" required/>
+ <textarea name="address" maxlength="500" placeholder="Domicilio de entrega" autocomplete="street-address" required></textarea>
+ <div class="cart-total" id="checkoutSummary"></div>
+ <button class="btn-primary" type="submit" style="width:100%;margin-top:16px">Enviar pedido</button>
+ <button class="mmi-btn" type="button" onclick="cancelCheckout()" style="width:100%;margin-top:8px">Volver a mi orden</button>
+ </form>
  </div>
 </div>
 
 <!-- NOTIFICATION TOAST -->
 <div class="toast" id="toast"></div>
 
-<script src="data.js"></script>
-<script src="app.js"></script>
+<script src="data.js?v=<?= filemtime(__DIR__ . '/data.js') ?>"></script>
+<script src="app.js?v=<?= filemtime(__DIR__ . '/app.js') ?>"></script>
 </body>
 </html>

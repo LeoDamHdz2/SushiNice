@@ -6,16 +6,15 @@
 let cart = [];
 let currentUser = null;
 let currentCat = 'sopas';
+let MENU_DATA = {};
 
 // ══════════════════════════════════
 // INIT
 // ══════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
-  renderMenu('sopas');
-  initSalesChart();
-  initTopItems();
   initNavScroll();
   initMenuTabs();
+  loadMenu();
   restoreSession();
 });
 
@@ -51,24 +50,80 @@ function renderMenu(cat) {
   const items = MENU_DATA[cat] || [];
   grid.innerHTML = items.map(item => `
     <div class="menu-card" onclick="addToCart(${item.id})">
-      <img class="menu-card-img" src="${item.img}" alt="${item.name}"
-           onerror="this.src='https://images.unsplash.com/photo-1617196034183-421b4040ed20?w=400&q=80'"/>
+      <img class="menu-card-img" src="${escapeHtml(item.image)}" alt="${escapeHtml(item.name)}"/>
       <div class="menu-card-body">
-        <div class="menu-card-category">${item.category}</div>
-        <div class="menu-card-name">${item.name}</div>
-        <div class="menu-card-desc">${item.desc}</div>
+        <div class="menu-card-category">${escapeHtml(categoryName(item.category))}</div>
+        <div class="menu-card-name">${escapeHtml(item.name)}</div>
+        <div class="menu-card-desc">${escapeHtml(item.description)}</div>
         <div class="menu-card-footer">
-          <span class="menu-card-price">$${item.price}</span>
+          <span class="menu-card-price">${formatPrice(item.price)}</span>
           <button class="btn-add" onclick="event.stopPropagation();addToCart(${item.id})">+</button>
         </div>
       </div>
     </div>
   `).join('');
+  if (items.length === 0) {
+    grid.innerHTML = '<p class="cart-empty">No hay platillos disponibles en esta categoría.</p>';
+  }
 }
 
 // ══════════════════════════════════
 // CART
 // ══════════════════════════════════
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character]);
+}
+
+function formatPrice(value) {
+  return `$${Number(value).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function categoryName(category) {
+  return ({
+    sopas: 'Sopas / Ramen',
+    ensaladas: 'Ensaladas',
+    kushiagues: 'Kushiagues',
+    rolls: 'Rolls Especiales',
+    bebidas: 'Bebidas',
+  })[category] || category;
+}
+
+async function apiRequest(action, payload = {}, method = 'POST') {
+  const options = { method, headers: { Accept: 'application/json' }, credentials: 'same-origin' };
+  if (method === 'POST') {
+    options.headers['Content-Type'] = 'application/json';
+    options.body = JSON.stringify({ ...payload, action });
+  }
+  const url = method === 'GET' ? `api.php?action=${encodeURIComponent(action)}` : 'api.php';
+  const response = await fetch(url, options);
+  const body = await response.text();
+  let result;
+  try {
+    result = JSON.parse(body);
+  } catch {
+    throw new Error('El servidor devolvió una respuesta inválida.');
+  }
+  if (!response.ok) throw new Error(result.error || 'No se pudo completar la operación.');
+  return result;
+}
+
+async function loadMenu() {
+  try {
+    const result = await apiRequest('menu', {}, 'GET');
+    MENU_DATA = {};
+    for (const item of result.items) {
+      item.id = Number(item.id);
+      item.price = Number(item.price);
+      (MENU_DATA[item.category] ||= []).push(item);
+    }
+    renderMenu(currentCat);
+  } catch (error) {
+    showToast(error.message || 'No se pudo cargar el menú.');
+  }
+}
+
 function getAllItems() {
   return Object.values(MENU_DATA).flat();
 }
@@ -111,17 +166,17 @@ function renderCart() {
   container.innerHTML = cart.map(item => `
     <div class="cart-item">
       <div>
-        <div class="cart-item-name">${item.name}</div>
+        <div class="cart-item-name">${escapeHtml(item.name)}</div>
         <div class="cart-item-qty">x${item.qty}</div>
       </div>
       <div style="display:flex;align-items:center;gap:12px;">
-        <span class="cart-item-price">$${item.price * item.qty}</span>
+        <span class="cart-item-price">${formatPrice(item.price * item.qty)}</span>
         <button class="btn-remove" onclick="removeFromCart(${item.id})"><i class="fas fa-times"></i></button>
       </div>
     </div>
   `).join('');
   const total = cart.reduce((s, i) => s + i.price * i.qty, 0);
-  totalEl.innerHTML = `Total: <span style="color:var(--red)">$${total}</span>`;
+  totalEl.innerHTML = `Total: <span style="color:var(--red)">${formatPrice(total)}</span>`;
 }
 
 function removeFromCart(id) {
@@ -131,11 +186,50 @@ function removeFromCart(id) {
 }
 
 function checkout() {
-  if (cart.length === 0) return;
-  showToast('Pedido confirmado. Preparando tu orden...');
-  cart = [];
-  updateCartBadge();
-  closeCart();
+  if (cart.length === 0) {
+    showToast('Agrega al menos un platillo antes de continuar.');
+    return;
+  }
+  document.getElementById('checkoutSummary').textContent =
+    `Total estimado: ${formatPrice(cart.reduce((sum, item) => sum + item.price * item.qty, 0))}`;
+  document.getElementById('cartContents').style.display = 'none';
+  document.getElementById('checkoutForm').style.display = 'block';
+}
+
+function cancelCheckout() {
+  document.getElementById('checkoutForm').style.display = 'none';
+  document.getElementById('cartContents').style.display = 'block';
+}
+
+async function submitOrder(event) {
+  event.preventDefault();
+  if (cart.length === 0) {
+    showToast('Tu orden está vacía.');
+    cancelCheckout();
+    return;
+  }
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const fields = Object.fromEntries(new FormData(form));
+  button.disabled = true;
+  button.textContent = 'Guardando pedido...';
+  try {
+    const result = await apiRequest('create-order', {
+      ...fields,
+      items: cart.map(item => ({ id: item.id, qty: item.qty })),
+    });
+    cart = [];
+    form.reset();
+    cancelCheckout();
+    updateCartBadge();
+    closeCart();
+    showToast(`Pedido #${result.order.id} confirmado. Total: ${formatPrice(result.order.total)}`);
+  } catch (error) {
+    showToast(error.message || 'No se pudo guardar el pedido.');
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Enviar pedido';
+  }
 }
 
 // ══════════════════════════════════
@@ -283,78 +377,200 @@ function openAdmin() {
   if (!currentUser || !currentUser.isAdmin) {
     showToast('Acceso solo para administradores'); return;
   }
-  renderAdminMenu();
-  renderOrders();
-  renderPredChart();
   document.getElementById('adminModal').classList.add('open');
+  switchAdmin('ventas', document.querySelector('.atab'));
+  loadAdminData();
 }
 function closeAdmin() {
   document.getElementById('adminModal').classList.remove('open');
 }
 
-function switchAdmin(panel) {
-  document.querySelectorAll('.atab').forEach(t => t.classList.remove('active'));
-  event.target.classList.add('active');
+function switchAdmin(panel, button) {
+  document.querySelectorAll('.atab').forEach(tab => tab.classList.toggle('active', tab === button));
   document.getElementById('adminVentas').style.display = panel === 'ventas' ? 'block' : 'none';
   document.getElementById('adminMenu').style.display = panel === 'menu' ? 'block' : 'none';
   document.getElementById('adminPedidos').style.display = panel === 'pedidos' ? 'block' : 'none';
+  if (panel === 'menu') renderAdminMenu();
+  if (panel === 'pedidos') loadAdminOrders();
+}
+
+async function loadAdminData() {
+  try {
+    const [dashboard, sales] = await Promise.all([
+      apiRequest('admin-dashboard', {}, 'GET'),
+      apiRequest('admin-sales', {}, 'GET'),
+    ]);
+    document.getElementById('salesToday').textContent = formatPrice(dashboard.stats.sales);
+    document.getElementById('ordersToday').textContent = dashboard.stats.orders;
+    document.getElementById('averageTicket').textContent = formatPrice(dashboard.stats.average);
+    document.getElementById('activeOrders').textContent = dashboard.stats.active || 0;
+    renderSalesChart(sales.days);
+    renderTopItems(sales.topItems);
+  } catch (error) {
+    showToast(error.message || 'No se pudieron cargar las estadísticas.');
+  }
 }
 
 function renderAdminMenu() {
   const container = document.getElementById('menuManager');
-  const all = getAllItems();
+  const all = getAllItems().sort((first, second) => first.id - second.id);
   container.innerHTML = all.map(item => `
     <div class="menu-manage-item">
-      <span class="mmi-name">${item.name}</span>
-      <span class="mmi-price">$${item.price}</span>
+      <span class="mmi-name">${escapeHtml(item.name)}</span>
+      <span class="mmi-price">${formatPrice(item.price)}</span>
       <div class="mmi-actions">
-        <button class="mmi-btn" onclick="editItem(${item.id})">Editar</button>
-        <button class="mmi-btn" onclick="showToast('Item eliminado')">Eliminar</button>
+        <button class="mmi-btn" type="button" onclick="editItem(${item.id})">Editar</button>
+        <button class="mmi-btn" type="button" onclick="deleteItem(${item.id})">Eliminar</button>
       </div>
     </div>
   `).join('');
+  if (all.length === 0) container.innerHTML = '<p class="cart-empty">El menú no tiene platillos.</p>';
 }
 
 function editItem(id) {
-  showToast('Modo edicion habilitado');
-}
-function addItem() {
-  showToast('Formulario de nuevo item (en desarrollo)');
+  const item = getAllItems().find(menuItem => menuItem.id === id);
+  if (!item) {
+    showToast('El platillo ya no existe.');
+    return;
+  }
+  const form = document.getElementById('menuItemForm');
+  form.elements.id.value = item.id;
+  form.elements.name.value = item.name;
+  form.elements.category.value = item.category;
+  form.elements.description.value = item.description;
+  form.elements.price.value = item.price;
+  form.elements.image.value = item.image;
+  form.style.display = 'grid';
+  form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function renderOrders() {
+function addItem() {
+  const form = document.getElementById('menuItemForm');
+  form.reset();
+  form.elements.id.value = '';
+  form.style.display = 'grid';
+  form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function cancelMenuEdit() {
+  const form = document.getElementById('menuItemForm');
+  form.reset();
+  form.style.display = 'none';
+}
+
+async function saveMenuItem(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const fields = Object.fromEntries(new FormData(form));
+  if (fields.id) fields.id = Number(fields.id);
+  fields.price = Number(fields.price);
+  button.disabled = true;
+  try {
+    await apiRequest('menu-save', fields);
+    cancelMenuEdit();
+    await loadMenu();
+    renderAdminMenu();
+    showToast('El menú se guardó correctamente.');
+  } catch (error) {
+    showToast(error.message || 'No se pudo guardar el platillo.');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function deleteItem(id) {
+  const item = getAllItems().find(menuItem => menuItem.id === id);
+  if (!item || !window.confirm(`¿Eliminar ${item.name} del menú?`)) return;
+  try {
+    await apiRequest('menu-delete', { id });
+    await loadMenu();
+    renderAdminMenu();
+    showToast('El platillo se eliminó del menú.');
+  } catch (error) {
+    showToast(error.message || 'No se pudo eliminar el platillo.');
+  }
+}
+
+async function loadAdminOrders() {
+  try {
+    const result = await apiRequest('admin-orders', {}, 'GET');
+    renderOrders(result.orders);
+  } catch (error) {
+    showToast(error.message || 'No se pudieron cargar los pedidos.');
+  }
+}
+
+function renderOrders(orders) {
   const container = document.getElementById('ordersList');
-  container.innerHTML = ACTIVE_ORDERS.map(o => `
+  container.innerHTML = orders.map(order => `
     <div class="order-item">
       <div>
-        <strong>${o.id}</strong> · ${o.items}
-        <div style="font-size:0.75rem;color:var(--gray);margin-top:4px">Hace ${o.time} · ${o.total}</div>
+        <strong>Pedido #${order.id}</strong> · ${escapeHtml(order.items)}
+        <div style="font-size:0.75rem;color:var(--gray);margin-top:4px">
+          ${escapeHtml(order.customer)} · ${escapeHtml(order.email)} · ${escapeHtml(order.phone)} · ${formatPrice(order.total)}
+        </div>
+        <div style="font-size:0.75rem;color:var(--gray);margin-top:4px">${escapeHtml(order.address)}</div>
       </div>
-      <span class="order-badge ${o.status === 'ready' ? 'badge-ready' : 'badge-pending'}">
-        ${o.status === 'ready' ? 'Listo' : 'En preparacion'}
-      </span>
+      <select aria-label="Estado del pedido ${order.id}" onchange="updateOrderStatus(${order.id}, this.value)">
+        ${['pending', 'preparing', 'ready'].map(status => `
+          <option value="${status}" ${order.status === status ? 'selected' : ''}>
+            ${orderStatusLabel(status)}
+          </option>`).join('')}
+        <option value="completed">Completado</option>
+        <option value="cancelled">Cancelado</option>
+      </select>
     </div>
   `).join('');
+  if (orders.length === 0) container.innerHTML = '<p class="cart-empty">No hay pedidos activos.</p>';
 }
 
-function renderPredChart() {
-  const container = document.getElementById('predChart');
-  if (!container) return;
-  const max = Math.max(...SALES_DATA.prediction);
-  container.innerHTML = `
-    <div class="pred-bars">
-      ${SALES_DATA.days.map((day, i) => {
-        const h = Math.round((SALES_DATA.prediction[i] / max) * 90);
-        const isHigh = SALES_DATA.prediction[i] === max;
-        return `
-          <div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;">
-            <div class="pred-bar ${isHigh ? 'high' : ''}"
-                 style="height:${h}px;background:${isHigh ? 'var(--gold)' : 'var(--red)'};border-radius:4px 4px 0 0;width:100%"></div>
-            <span style="font-size:0.65rem;color:var(--gray)">${day}</span>
-          </div>`;
-      }).join('')}
-    </div>
-  `;
+function orderStatusLabel(status) {
+  return ({ pending: 'Pendiente', preparing: 'En preparación', ready: 'Listo' })[status] || status;
+}
+
+async function updateOrderStatus(id, status) {
+  try {
+    await apiRequest('order-status', { id, status });
+    await Promise.all([loadAdminOrders(), loadAdminData()]);
+    showToast('Estado del pedido actualizado.');
+  } catch (error) {
+    showToast(error.message || 'No se pudo actualizar el pedido.');
+    loadAdminOrders();
+  }
+}
+
+function renderSalesChart(days) {
+  const container = document.getElementById('salesChart');
+  const max = Math.max(...days.map(day => Number(day.total)), 1);
+  container.innerHTML = days.map(day => {
+    const height = Math.round((Number(day.total) / max) * 170);
+    const label = new Date(`${day.date}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'short' });
+    return `
+      <div class="bar-wrap">
+        <div style="position:relative;display:flex;align-items:flex-end;height:180px">
+          <div class="bar actual" title="${formatPrice(day.total)}" style="height:${height}px;width:22px">
+            ${Number(day.total) > 0 ? `<span class="bar-val">${formatPrice(day.total)}</span>` : ''}
+          </div>
+        </div>
+        <span class="bar-label">${escapeHtml(label)}</span>
+      </div>`;
+  }).join('');
+}
+
+function renderTopItems(items) {
+  const container = document.getElementById('topItems');
+  const max = Math.max(...items.map(item => Number(item.quantity)), 1);
+  container.innerHTML = items.map(item => {
+    const percentage = Math.round((Number(item.quantity) / max) * 100);
+    return `
+      <div class="top-item">
+        <span class="top-item-name">${escapeHtml(item.name)}</span>
+        <div class="top-item-bar"><div class="top-item-fill" style="width:${percentage}%"></div></div>
+        <span class="top-item-pct">${Number(item.quantity)} pzas.</span>
+      </div>`;
+  }).join('');
+  if (items.length === 0) container.innerHTML = '<p class="cart-empty">Aún no hay ventas registradas.</p>';
 }
 
 // ══════════════════════════════════
@@ -371,7 +587,7 @@ function sendAI() {
     setTimeout(() => {
       removeTyping();
       const response = getAIResponse(text);
-      appendMsg(response.reply, 'bot');
+      appendMsg(response, 'bot');
     }, 1200);
   }, 300);
 }
@@ -384,7 +600,7 @@ function appendMsg(text, type) {
   div.className = `ai-msg ${isBot ? 'bot' : 'user'}${isTyping ? ' ai-typing' : ''}`;
   div.innerHTML = isBot
     ? `<div class="bot-avatar">N</div><div class="msg-bubble">${formatMsg(text)}</div>`
-    : `<div class="msg-bubble">${text}</div>`;
+    : `<div class="msg-bubble">${escapeHtml(text)}</div>`;
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
 }
@@ -394,66 +610,56 @@ function removeTyping() {
 }
 
 function formatMsg(text) {
-  return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  return escapeHtml(text).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 }
 
 function getAIResponse(text) {
   const lower = text.toLowerCase();
   const kws = AI_RESPONSES.keywords;
-  if (lower.includes('picante') || lower.includes('picoso') || lower.includes('spicy')) return kws.picante;
-  if (lower.includes('salmon') || lower.includes('salmón')) return kws.salmon;
-  if (lower.includes('camaron') || lower.includes('camarón') || lower.includes('shrimp')) return kws.camaron;
-  if (lower.includes('vegetal') || lower.includes('verdura') || lower.includes('vegetariano')) return kws.vegetal;
-  if (lower.includes('recomienda') || lower.includes('popular') || lower.includes('mejor')) return kws.recomendacion;
-  if (lower.includes('economic') || lower.includes('barato') || lower.includes('precio')) return kws.economico;
-  return kws.default;
-}
+  let recommendation = kws.default;
+  if (lower.includes('picante') || lower.includes('picoso') || lower.includes('spicy')) {
+    recommendation = kws.picante;
+  } else if (lower.includes('salmon') || lower.includes('salmón')) {
+    recommendation = kws.salmon;
+  } else if (lower.includes('camaron') || lower.includes('camarón') || lower.includes('shrimp')) {
+    recommendation = kws.camaron;
+  } else if (lower.includes('vegetal') || lower.includes('verdura') || lower.includes('vegetariano')) {
+    recommendation = kws.vegetal;
+  } else if (lower.includes('recomienda') || lower.includes('popular') || lower.includes('mejor')) {
+    recommendation = kws.recomendacion;
+  } else if (lower.includes('economic') || lower.includes('barato') || lower.includes('precio')) {
+    recommendation = kws.economico;
+  }
 
-// ══════════════════════════════════
-// SALES CHART (public panel)
-// ══════════════════════════════════
-function initSalesChart() {
-  const container = document.getElementById('salesChart');
-  if (!container) return;
-  const maxVal = Math.max(...SALES_DATA.actual, ...SALES_DATA.prediction);
-  const chartH = 180;
-  container.innerHTML = SALES_DATA.days.map((day, i) => {
-    const actualH = Math.round((SALES_DATA.actual[i] / maxVal) * chartH);
-    const predH = Math.round((SALES_DATA.prediction[i] / maxVal) * chartH);
-    return `
-      <div class="bar-wrap">
-        <div style="position:relative;display:flex;align-items:flex-end;gap:3px;height:${chartH}px">
-          <div class="bar actual" style="height:${actualH}px;width:16px">
-            <span class="bar-val">$${Math.round(SALES_DATA.actual[i]/1000)}k</span>
-          </div>
-          <div class="bar prediction" style="height:${predH}px;width:16px"></div>
-        </div>
-        <span class="bar-label">${day}</span>
-      </div>`;
-  }).join('');
-}
+  if (recommendation === kws.default) {
+    return 'Bienvenido a SushiNice. ' + recommendation.intro;
+  }
 
-function initTopItems() {
-  const container = document.getElementById('topItems');
-  if (!container) return;
-  container.innerHTML = SALES_DATA.topItems.map(item => `
-    <div class="top-item">
-      <span class="top-item-name">${item.name}</span>
-      <div class="top-item-bar">
-        <div class="top-item-fill" style="width:${item.pct}%"></div>
-      </div>
-      <span class="top-item-pct">${item.pct}%</span>
-    </div>
-  `).join('');
+  const items = recommendation === kws.economico
+    ? getAllItems().sort((first, second) => first.price - second.price).slice(0, 3)
+    : recommendation.items.map(id => getAllItems().find(item => item.id === id)).filter(Boolean);
+  if (items.length === 0) return 'No hay platillos disponibles en este momento. Inténtalo más tarde.';
+  return `${recommendation.intro} ${items.map(item => `**${item.name}** (${formatPrice(item.price)})`).join(', ')}.`;
 }
 
 // ══════════════════════════════════
 // CONTACT
 // ══════════════════════════════════
-function submitContact(e) {
+async function submitContact(e) {
   e.preventDefault();
-  showToast('Mensaje enviado. Te contactaremos pronto.');
-  e.target.reset();
+  const form = e.currentTarget;
+  const button = form.querySelector('button[type="submit"]');
+  const fields = Object.fromEntries(new FormData(form));
+  button.disabled = true;
+  try {
+    await apiRequest('contact', fields);
+    form.reset();
+    showToast('Mensaje enviado y guardado. Te contactaremos pronto.');
+  } catch (error) {
+    showToast(error.message || 'No se pudo guardar el mensaje.');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 // ══════════════════════════════════
