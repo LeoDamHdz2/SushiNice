@@ -161,15 +161,33 @@ function switchLogin(tab, button) {
 
 async function authRequest(payload, method = 'POST') {
   const options = { method, headers: { Accept: 'application/json' }, credentials: 'same-origin' };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  options.signal = controller.signal;
   if (method === 'POST') {
     options.headers['Content-Type'] = 'application/json';
     options.body = JSON.stringify(payload);
   }
   const url = method === 'GET' ? 'auth.php?action=session' : 'auth.php';
-  const response = await fetch(url, options);
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error || 'No se pudo completar la operación.');
-  return result;
+  try {
+    const response = await fetch(url, options);
+    const body = await response.text();
+    let result;
+    try {
+      result = JSON.parse(body);
+    } catch {
+      throw new Error('El servidor devolvió una respuesta inválida.');
+    }
+    if (!response.ok) throw new Error(result.error || 'No se pudo completar la operación.');
+    return result;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('El servidor tardó demasiado en responder. Revisa que Apache y MySQL estén activos e inténtalo de nuevo.');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function restoreSession() {
@@ -194,8 +212,12 @@ function updateAuthUI() {
 
 async function doLogin(event) {
   event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('button[type="submit"]');
   const email = document.getElementById('loginEmail').value.trim();
   const password = document.getElementById('loginPass').value;
+  submitButton.disabled = true;
+  submitButton.textContent = 'Iniciando sesión...';
   try {
     const result = await authRequest({ action: 'login', email, password });
     currentUser = result.user;
@@ -206,11 +228,16 @@ async function doLogin(event) {
     if (currentUser.isAdmin) setTimeout(openAdmin, 500);
   } catch (error) {
     showToast(error.message || 'No se pudo iniciar sesión.');
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = 'Entrar';
   }
 }
 
 async function doRegister(event) {
   event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('button[type="submit"]');
   const name = document.getElementById('registerName').value.trim();
   const email = document.getElementById('registerEmail').value.trim();
   const password = document.getElementById('registerPass').value;
@@ -221,6 +248,8 @@ async function doRegister(event) {
     return;
   }
 
+  submitButton.disabled = true;
+  submitButton.textContent = 'Creando cuenta...';
   try {
     await authRequest({ action: 'register', name, email, password });
     document.getElementById('registerForm').reset();
@@ -229,6 +258,9 @@ async function doRegister(event) {
     showToast('Cuenta creada. Ahora puedes iniciar sesión.');
   } catch (error) {
     showToast(error.message || 'No se pudo crear la cuenta.');
+  } finally {
+    submitButton.disabled = false;
+    submitButton.textContent = 'Crear cuenta';
   }
 }
 
