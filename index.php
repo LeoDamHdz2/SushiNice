@@ -27,9 +27,9 @@
  </ul>
  <div class="nav-actions">
  <button class="btn-order" onclick="openCart()"><i class="fas fa-shopping-bag"></i> Ordenar</button>
- <button class="btn-login" onclick="openProfile()"><i class="fas fa-user"></i> Entrar / mi pedido</button>
+ <button class="btn-login" onclick="openProfile()" aria-label="Entrar o consultar mi pedido"><i class="fas fa-user"></i><span class="nav-login-label"> Entrar / mi pedido</span></button>
  <button class="btn-login" id="logoutButton" onclick="logout()" hidden>Salir</button>
- <button class="hamburger" id="hamburger"><i class="fas fa-bars"></i></button>
+ <button class="hamburger" id="hamburger" type="button" aria-label="Abrir menú de navegación" aria-controls="navLinks" aria-expanded="false"><i class="fas fa-bars" aria-hidden="true"></i></button>
  </div>
 </nav>
 
@@ -160,13 +160,12 @@
  </div>
  <div class="location-wrap">
  <div class="location-info">
- <div class="info-card"><i class="fas fa-map-marker-alt"></i><div><h4>Dirección</h4><p>Av. Insurgentes Sur 1234, Col. Del Valle, CDMX</p></div></div>
+ <div class="info-card"><i class="fas fa-map-marker-alt"></i><div><h4>Dirección</h4><p>Carretera Tula - San Marcos, San Lorenzo, Tula, Hidalgo</p></div></div>
  <div class="info-card"><i class="fas fa-car"></i><div><h4>Estacionamiento</h4><p>Estacionamiento gratuito disponible</p></div></div>
- <div class="info-card"><i class="fas fa-subway"></i><div><h4>Metro</h4><p>Estación Insurgentes (Línea 1)</p></div></div>
- <a href="https://maps.google.com" target="_blank" class="btn-primary" style="display:inline-block;margin-top:16px;">Abrir en Google Maps <i class="fas fa-external-link-alt"></i></a>
+ <a href="https://www.google.com/maps/search/?api=1&amp;query=Carretera%20Tula%20-%20San%20Marcos%2C%20San%20Lorenzo%2C%20Tula%2C%20Hidalgo" target="_blank" rel="noopener noreferrer" class="btn-primary" style="display:inline-block;margin-top:16px;">Abrir en Google Maps <i class="fas fa-external-link-alt"></i></a>
  </div>
  <div class="map-placeholder">
- <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3763.8!2d-99.1676!3d19.4004!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x0%3A0x0!2zMTnCsDI0JzAxLjQiTiA5OcKwMTAnMDMuNCJX!5e0!3m2!1ses!2smx!4v1" width="100%" height="350" style="border:0;border-radius:12px;" allowfullscreen loading="lazy"></iframe>
+ <iframe src="https://maps.google.com/maps?q=Carretera%20Tula%20-%20San%20Marcos%2C%20San%20Lorenzo%2C%20Tula%2C%20Hidalgo&amp;output=embed" width="100%" height="350" style="border:0;border-radius:12px;" allowfullscreen loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
  </div>
  </div>
 </section>
